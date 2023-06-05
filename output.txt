@@ -1,0 +1,400 @@
+--Table 1
+
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, trim, current_date, current_timestamp, current_user
+from pyspark.sql.window import Window
+from pyspark.sql.functions import max as spark_max
+
+# Create a SparkContext
+sc = SparkContext()
+# Create a GlueContext
+glueContext = GlueContext(sc)
+# Create a SparkSession
+spark = glueContext.spark_session
+
+# Set up PostgreSQL JDBC connection properties
+postgres_url = "jdbc:postgresql://<hostname>:<port>/<database>"
+postgres_properties = {
+    "user": "<username>",
+    "password": "<password>",
+    "driver": "org.postgresql.Driver"
+}
+
+# Load data from source table methodology_stg.stg_meth_doc
+source_meth_doc_df = spark.read.jdbc(url=postgres_url, table="methodology_stg.stg_meth_doc", properties=postgres_properties)
+
+# Join with existing records in methodology.meth table to find merged records
+joined_df = source_meth_doc_df.join(
+    spark.table("methodology.meth").alias("c"),
+    source_meth_doc_df.Merged_to_Methodology_name == col("c.meth_nm"),
+    "left"
+)
+
+# Get the maximum Methodology_Document_Version_Number for each Methodology_Name
+max_version_num_df = source_meth_doc_df.groupBy(trim(source_meth_doc_df.Methodology_Name).alias("trimmed_name")) \
+    .agg(spark_max(source_meth_doc_df.Methodology_Document_Version_Number).alias("max_version_num"))
+
+# Apply transformations and prepare the data for merge
+meth_df = joined_df.join(
+    max_version_num_df,
+    (trim(source_meth_doc_df.Methodology_Name) == trim(joined_df.Methodology_Name)) &
+    (source_meth_doc_df.Methodology_Document_Version_Number == max_version_num_df.max_version_num),
+    "inner"
+).select(
+    "c.meth_id",
+    trim(source_meth_doc_df.Methodology_Name).alias("meth_nm"),
+    joined_df.meth_typ_cd,
+    current_timestamp().alias("modified_dtm"),
+    current_user().alias("modified_user_id")
+)
+
+# Create a temporary view for the source data
+meth_df.createOrReplaceTempView("meth_df_tmp")
+
+# Perform merge operation to handle conflicts and insert/update data
+spark.sql("""
+MERGE INTO methodology.meth AS target
+USING meth_df_tmp AS source
+ON target.meth_id = source.meth_id
+WHEN MATCHED THEN
+  UPDATE SET
+    target.meth_nm = source.meth_nm,
+    target.meth_typ_cd = source.meth_typ_cd,
+    target.modified_dtm = source.modified_dtm,
+    target.modified_user_id = source.modified_user_id
+WHEN NOT MATCHED THEN
+  INSERT (meth_id, meth_nm, meth_typ_cd, modified_dtm, modified_user_id)
+  VALUES (source.meth_id, source.meth_nm, source.meth_typ_cd, source.modified_dtm, source.modified_user_id)
+""")
+
+# Drop the temporary view
+spark.catalog.dropTempView("meth_df_tmp")
+
+
+
+--Table 2 
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, trim, current_date, current_timestamp, current_user
+from pyspark.sql.window import Window
+from pyspark.sql.functions import max as spark_max
+
+# Create a SparkContext
+sc = SparkContext()
+# Create a GlueContext
+glueContext = GlueContext(sc)
+# Create a SparkSession
+spark = glueContext.spark_session
+
+# Set up PostgreSQL JDBC connection properties
+postgres_url = "jdbc:postgresql://<hostname>:<port>/<database>"
+postgres_properties = {
+    "user": "<username>",
+    "password": "<password>",
+    "driver": "org.postgresql.Driver"
+}
+
+# Load data from source table methodology_stg.stg_meth_doc
+source_meth_doc_df = spark.read.jdbc(url=postgres_url, table="methodology_stg.stg_meth_doc", properties=postgres_properties)
+
+# Load data from target table methodology.meth
+meth_df = spark.table("methodology.meth")
+
+# Load data from target table methodology.lkp_meth_doc_status
+meth_doc_status_df = spark.table("methodology.lkp_meth_doc_status")
+
+# Apply transformations and prepare the data for merge
+meth_doc_df = source_meth_doc_df.join(
+    meth_df,
+    trim(source_meth_doc_df.Methodology_Name) == trim(meth_df.meth_nm),
+    "inner"
+).join(
+    meth_doc_status_df,
+    trim(source_meth_doc_df.Methodology_Status) == trim(meth_doc_status_df.meth_doc_status_desc),
+    "inner"
+).select(
+    spark.sql("nextval('meth_doc_id_seq')").alias("meth_doc_id"),
+    meth_df.meth_id,
+    source_meth_doc_df.Publishing_Entity_Code,
+    source_meth_doc_df.Language_Name,
+    source_meth_doc_df.Methodology_Document_Version_Number.cast("int").alias("meth_vrsn_num"),
+    source_meth_doc_df.Methodology_Document_Type_Code,
+    trim(source_meth_doc_df.Methodology_Document_Publication_Name).alias("publ_titl_text"),
+    source_meth_doc_df.Methodology_Document_CMS_Document_Identifier,
+    source_meth_doc_df.Methodology_Document_RMC_Document_Identifier.substr(0, length(source_meth_doc_df.Methodology_Document_RMC_Document_Identifier) - 2).alias("rmc_doc_id"),
+    source_meth_doc_df.Methodology_Document_Publication_Datetime.cast("timestamp").alias("publcn_dtm"),
+    source_meth_doc_df.Methodology_Document_Modification_DateTime.cast("timestamp").alias("meth_doc_modified_dtm"),
+    meth_doc_status_df.meth_doc_status_cd,
+    current_timestamp().alias("modified_dtm"),
+    current_user().alias("modified_user_id")
+)
+
+# Create a temporary view for the source data
+meth_doc_df.createOrReplaceTempView("meth_doc_df_tmp")
+
+# Perform merge operation to handle conflicts and insert/update data
+spark.sql("""
+MERGE INTO methodology.meth_doc AS target
+USING meth_doc_df_tmp AS source
+ON target.meth_doc_id = source.meth_doc_id
+WHEN MATCHED THEN
+  UPDATE SET
+    target.meth_id = source.meth_id,
+    target.Publishing_Entity_Code = source.Publishing_Entity_Code,
+    target.Language_Name = source.Language_Name,
+    target.meth_vrsn_num = source.meth_vrsn_num,
+    target.Methodology_Document_Type_Code = source.Methodology_Document_Type_Code,
+    target.publ_titl_text = source.publ_titl_text,
+    target.Methodology_Document_CMS_Document_Identifier = source.Methodology_Document_CMS_Document_Identifier,
+    target.rmc_doc_id = source.rmc_doc_id,
+    target.publcn_dtm = source.publcn_dtm,
+    target.meth_doc_modified_dtm = source.meth_doc_modified_dtm,
+    target.status_cd = source.meth_doc_status_cd,
+    target.modified_dtm = source.modified_dtm,
+    target.modified_user_id = source.modified_user_id
+WHEN NOT MATCHED THEN
+  INSERT (
+    meth_doc_id,
+    meth_id,
+    Publishing_Entity_Code,
+    Language_Name,
+    meth_vrsn_num,
+    Methodology_Document_Type_Code,
+    publ_titl_text,
+    Methodology_Document_CMS_Document_Identifier,
+    rmc_doc_id,
+    publcn_dtm,
+    meth_doc_modified_dtm,
+    status_cd,
+    modified_dtm,
+    modified_user_id
+  )
+  VALUES (
+    source.meth_doc_id,
+    source.meth_id,
+    source.Publishing_Entity_Code,
+    source.Language_Name,
+    source.meth_vrsn_num,
+    source.Methodology_Document_Type_Code,
+    source.publ_titl_text,
+    source.Methodology_Document_CMS_Document_Identifier,
+    source.rmc_doc_id,
+    source.publcn_dtm,
+    source.meth_doc_modified_dtm,
+    source.meth_doc_status_cd,
+    source.modified_dtm,
+    source.modified_user_id
+  )
+""")
+
+# Print the result
+meth_doc_df.show()
+
+
+
+--Table 3
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import current_timestamp
+
+# Create a GlueContext
+spark_context = SparkContext()
+glue_context = GlueContext(spark_context)
+spark = glue_context.spark_session
+
+# Initialize the SparkSession
+spark = SparkSession.builder \
+    .appName("RFC_DOC_Insert") \
+    .getOrCreate()
+
+# Set the source and intermediate table names
+source_table = "methodology_stg.stg_rfc_roc"
+target_table = "methodology.rfc_doc"
+
+# Read the source table
+stg_rfc_roc_df = glue_context.create_dynamic_frame.from_catalog(database="your_database", table_name=source_table).toDF()
+
+# Read the lookup table
+lkp_rfc_status_df = glue_context.create_dynamic_frame.from_catalog(database="your_database", table_name="methodology.lkp_rfc_status").toDF()
+
+# Perform the merge operation
+merged_df = stg_rfc_roc_df.join(
+    lkp_rfc_status_df,
+    stg_rfc_roc_df.Request_for_Comment_Status_Code == lkp_rfc_status_df.rfc_status_txt,
+    "left"
+).selectExpr(
+    "nextval('rfc_id_seq') as rfc_id",
+    "trim(Request_for_Comment_Publication_Name) as rfc_publcn_name",
+    "Request_for_Comment_Open_Datetime as rfc_open_dtm",
+    "Request_for_Comment_Close_Datetime as rfc_close_dtm",
+    "Request_for_Comment_Original_Close_Datetime as rfc_origin_close_dtm",
+    "Request_for_Comment_CMS_Document_Identifier as rfc_cms_doc_id",
+    "Request_for_Comment_RMC_Document_Identifier as rfc_rmc_doc_id",
+    "lkp_rfc_status_df.rfc_status_cd",
+    "current_timestamp as modified_dtm",
+    "current_user as modified_user_id"
+)
+
+# Write the merged data to the target table with merge behavior
+merged_df.write \
+    .format("jdbc") \
+    .option("url", "jdbc:postgresql://your_hostname:your_port/your_database") \
+    .option("dbtable", target_table) \
+    .option("user", "your_username") \
+    .option("password", "your_password") \
+    .option("driver", "org.postgresql.Driver") \
+    .option("dbtable", f"(SELECT * FROM {target_table}) AS t") \
+    .option("createTableOptions", "ON CONFLICT (rfc_id) DO UPDATE SET rfc_publcn_name=excluded.rfc_publcn_name, rfc_open_dtm=excluded.rfc_open_dtm, rfc_close_dtm=excluded.rfc_close_dtm, rfc_origin_close_dtm=excluded.rfc_origin_close_dtm, rfc_cms_doc_id=excluded.rfc_cms_doc_id, rfc_rmc_doc_id=excluded.rfc_rmc_doc_id, rfc_status_cd=excluded.rfc_status_cd, modified_dtm=excluded.modified_dtm, modified_user_id=excluded.modified_user_id") \
+    .mode("append") \
+    .save()
+
+
+--Table 4
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import current_timestamp
+
+# Create a GlueContext
+spark_context = SparkContext()
+glue_context = GlueContext(spark_context)
+spark = glue_context.spark_session
+
+# Initialize the SparkSession
+spark = SparkSession.builder \
+    .appName("ROC_DOC_Insert") \
+    .getOrCreate()
+
+# Set the source and intermediate table names
+source_table = "methodology_stg.stg_rfc_roc"
+rfc_doc_table = "methodology.rfc_doc"
+target_table = "methodology.roc_doc"
+
+# Read the source table
+stg_rfc_roc_df = glue_context.create_dynamic_frame.from_catalog(database="your_database", table_name=source_table).toDF()
+
+# Read the RFC_DOC table
+rfc_doc_df = glue_context.create_dynamic_frame.from_catalog(database="your_database", table_name=rfc_doc_table).toDF()
+
+# Read the lookup table
+lkp_roc_status_df = glue_context.create_dynamic_frame.from_catalog(database="your_database", table_name="methodology.lkp_roc_status").toDF()
+
+# Perform the merge operation
+merged_df = stg_rfc_roc_df.join(
+    rfc_doc_df,
+    [
+        stg_rfc_roc_df.Request_for_Comment_CMS_Document_Identifier == rfc_doc_df.rfc_cms_doc_id,
+        stg_rfc_roc_df.Request_for_Comment_Publication_Name == rfc_doc_df.rfc_publcn_name,
+        stg_rfc_roc_df.Request_for_Comment_Open_Datetime == rfc_doc_df.rfc_open_dtm,
+        stg_rfc_roc_df.Request_for_Comment_Close_Datetime == rfc_doc_df.rfc_close_dtm,
+        stg_rfc_roc_df.Request_for_Comment_Original_Close_Datetime == rfc_doc_df.rfc_origin_close_dtm
+    ],
+    "inner"
+).join(
+    lkp_roc_status_df,
+    stg_rfc_roc_df.Result_of_Consultation_Status_Code == lkp_roc_status_df.roc_status_txt,
+    "inner"
+).selectExpr(
+    "rfc_doc_df.rfc_id as rfc_id",
+    "stg_rfc_roc_df.Result_of_Consultation_Publication_Name as roc_publcn_name",
+    "stg_rfc_roc_df.Result_of_Consultation_CMS_Document_Identifier as roc_cms_doc_id",
+    "stg_rfc_roc_df.Result_of_Consultation_RMC_Document_Identifier as roc_rmc_doc_id",
+    "stg_rfc_roc_df.Result_of_Consultation_Publication_Date as roc_publcn_date",
+    "lkp_roc_status_df.roc_status_cd",
+    "current_timestamp as modified_dtm",
+    "current_user as modified_user_id"
+)
+
+# Write the merged data to the target table with merge behavior
+merged_df.write \
+    .format("jdbc") \
+    .option("url", "jdbc:postgresql://your_hostname:your_port/your_database") \
+    .option("dbtable", target_table) \
+    .option("user", "your_username") \
+    .option("password", "your_password") \
+    .option("driver", "org.postgresql.Driver") \
+    .option("dbtable", f"(SELECT * FROM {target_table}) AS t") \
+    .option("createTableOptions", "ON CONFLICT (rfc_id) DO UPDATE SET roc_publcn_name=excluded.roc_publcn_name, roc_cms_doc_id=excluded.roc_cms_doc_id, roc_rmc_doc_id=excluded.roc_rmc_doc_id, roc_publcn_date=excluded.roc_publcn_date, roc_status_cd=excluded.roc_status_cd, modified_dtm=excluded.modified_dtm, modified_user_id=excluded.modified_user_id") \
+    .mode("append") \
+    .save()
+
+
+
+--Table 5
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import current_timestamp
+
+# Create a GlueContext
+spark_context = SparkContext()
+glue_context = GlueContext(spark_context)
+spark = glue_context.spark_session
+
+# Initialize the SparkSession
+spark = SparkSession.builder \
+    .appName("METH_RFC_Insert") \
+    .getOrCreate()
+
+# Set the source and intermediate table names
+source_table1 = "methodology_stg.stg_rfc_roc"
+source_table2 = "methodology_stg.stg_meth_doc"
+rfc_doc_table = "methodology.rfc_doc"
+meth_doc_table = "methodology.meth_doc"
+target_table = "methodology.meth_rfc"
+
+# Read the source tables
+stg_rfc_roc_df = glue_context.create_dynamic_frame.from_catalog(database="your_database", table_name=source_table1).toDF()
+stg_meth_doc_df = glue_context.create_dynamic_frame.from_catalog(database="your_database", table_name=source_table2).toDF()
+
+# Read the intermediate tables
+rfc_doc_df = glue_context.create_dynamic_frame.from_catalog(database="your_database", table_name=rfc_doc_table).toDF()
+meth_doc_df = glue_context.create_dynamic_frame.from_catalog(database="your_database", table_name=meth_doc_table).toDF()
+
+# Perform the merge operation
+merged_df = stg_rfc_roc_df.join(
+    rfc_doc_df,
+    stg_rfc_roc_df.Request_for_Comment_CMS_Document_Identifier == rfc_doc_df.rfc_cms_doc_id,
+    "inner"
+).join(
+    meth_doc_df,
+    [
+        stg_rfc_roc_df.batch == stg_meth_doc_df.batch,
+        stg_meth_doc_df.Language_Name == meth_doc_df.lang_iso_alpha_3_cd,
+        stg_meth_doc_df.Methodology_Document_Version_Number.cast("int") == meth_doc_df.meth_vrsn_num,
+        stg_meth_doc_df.Methodology_Document_Type_Code == meth_doc_df.meth_doc_typ_cd,
+        stg_meth_doc_df.Publishing_Entity_Code == meth_doc_df.publ_entity_cd
+    ],
+    "inner"
+).selectExpr(
+    "rfc_doc_df.rfc_id as rfc_id",
+    "meth_doc_df.meth_doc_id as meth_doc_id",
+    "current_timestamp as modified_dtm",
+    "current_user as modified_user_id"
+)
+
+# Write the merged data to the target table with merge behavior
+merged_df.write \
+    .format("jdbc") \
+    .option("url", "jdbc:postgresql://your_hostname:your_port/your_database") \
+    .option("dbtable", target_table) \
+    .option("user", "your_username") \
+    .option("password", "your_password") \
+    .option("driver", "org.postgresql.Driver") \
+    .option("dbtable", f"(SELECT * FROM {target_table}) AS t") \
+    .option("createTableOptions", "ON CONFLICT (rfc_id, meth_doc_id) DO UPDATE SET modified_dtm=excluded.modified_dtm, modified_user_id=excluded.modified_user_id") \
+    .mode("append") \
+    .save()
