@@ -1,0 +1,92 @@
+#DynamoDB Generic
+JOB_STATUS_TABLE='datamesh-jobstatus-{}'
+INV_TABLE ='datamesh-inventory-pipeline-{}'
+COL_TABLE = 'datamesh-inventory-pipeline-col-{}'
+DQ_SUGGESTION_TABLE = 'datamesh-deequ-suggestion-{}'
+DQ_TRACKER_TABLE = 'datamesh-deequ-tracker-{}'
+TABLE_ITEMS = 'Items'
+LAST_EVALUATED_KEY = 'LastEvaluatedKey'
+DYNAMO_DB='dynamodb'
+LINEAGE_TRACKER_TABLE = 'datamesh-lineage-tracker-{}'
+
+
+#DynamoDB Pipeline Table
+APP_NAME = 'app_name'
+DOMAIN_NAME = 'domain_name'
+PIPELINE_ID = 'pipeline_id'
+VERSION_NUMBER = 'version_number'
+LOAD_TYPE='load_type'
+FREQUENCY_TYPE = 'frequency_type'
+SOURCE_TYPE = 'source_type'
+SOURCE_DATABASE_TYPE = 'source_database_type'
+SOURCE_TABLE_NAME = 'source_table_name'
+SOURCE_PARTITION_COL = 'source_partition_col'
+SOURCE_QUERY = 'source_query'
+SOURCE_BUCKET_NAME = 'source_bucket_name'
+SOURCE_FILE_PATH = 'source_file_path'
+SOURCE_FILE_NAME = 'source_file_name'
+SOURCE_ENVIRONMENTS = 'source_environments'
+DATABASE_SECRET_MANAGER_NAME = 'database_secret_manager_name'
+PRIMARY_KEY_SET = 'primary_key_set'
+CDC_TIMESTAMP_KEY = 'cdc_timestamp_key'
+LOG_CHNG_INDICATOR_KEY = 'log_chng_indicator_key'
+TARGET_TYPE = 'target_type'
+TARGET_DATABASE_TYPE = 'target_database_type'
+TARGET_TABLE_NAME = 'target_table_name'
+TARGET_BUCKET_NAME = 'target_bucket_name'
+TARGET_FILE_NAME = 'target_file_name'
+TARGET_PARTITION_COL = 'target_partition_col'
+TARGET_ENVIRONMENTS = 'target_environments'
+LANDING_GLACIER_RETENTION_DAYS = 'landing_glacier_retention_days'
+OLA = 'ola'
+SLA = 'sla'
+
+
+#DynamoDB Pipeline Column Table
+PIPELINE_COLUMNS = 'pipeline_columns'
+SEQUENCE_NUMBER = 'sequence_number'
+SOURCE_COLUMN_NAME = 'source_column_name'
+SOURCE_DATATYPE = 'source_datatype'
+SOURCE_LENGTH = 'source_length'
+SOURCE_PRECISION = 'source_precision'
+SOURCE_DATETIME_FORMAT = 'source_datetime_format'
+TARGET_COLUMN_NAME = 'target_column_name'
+TARGET_DATATYPE = 'target_datatype'
+TARGET_LENGTH = 'target_length'
+TARGET_PRECISION = 'target_precision'
+TARGET_DATETIME_FORMAT = 'target_datetime_format'
+TRANSFORMATION_LOGIC = 'transformation_logic'
+
+
+#Yaml constants
+PIPELINES = 'pipelines'
+DATABASE = 'database'
+ACTIVE = 'active'
+ENVIRONMENT_NAME = 'environment_name'
+
+
+#DynamoDB JobStatus Table
+TABLE_NAME = 'table_name'
+EXECUTION_ID= 'execution_id'
+EXECUTION_START_DTTM='execution_start_dttm'
+EXECUTION_END_DTTM='execution_end_dttm'
+BUSINESS_ORDER_FROM_DTTM='business_order_from_dttm'
+BUSINESS_ORDER_TO_DTTM='business_order_to_dttm'
+LOAD_PHASE = 'load_phase'
+FINAL_COUNT = 'final_count'
+LANDING_COUNT = 'landing_count'
+PROCESSED_COUNT = 'processed_count'
+ERROR_MESSAGE = 'error_message'
+JOB_STATUS = 'job_status'
+SLA_MET = 'sla_met'
+
+#DynamoDB Response Object
+RESPONSE_METADATA = 'ResponseMetadata'
+HTTP_STATUS_CODE = 'HTTPStatusCode'
+
+#DYNAMODB TABLE CLEANUP
+DYNAMODB_TBL_CLEANUP = 'dynamoDbTblClean'
+DYNAMODB_TABLE_NAME = 'tableName'
+SORT_KEY = 'sortKey'
+PARTITION_KEY = 'partitionKey'
+SK_VALUES = 'skValues'
